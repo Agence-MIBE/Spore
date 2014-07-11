@@ -5,6 +5,8 @@
 from twisted.internet import protocol, reactor
 from twisted.protocols.basic import LineReceiver
 
+maxPlayers = 2
+
 # Protocol instance is started for each connection
 class FungusProtocol(LineReceiver):
 	def __init__(self, factory):
@@ -13,7 +15,8 @@ class FungusProtocol(LineReceiver):
 		# If data is received before the connection is made (why would that ever happen?)
 		# then this ID will be invalid
 		self.name = None						# Username
-		self.state = "UNCONNECTED"					# Possible states: UNCONNECTE, LOGIN, NOGAME, GAME
+		self.state = "UNCONNECTED"					# Possible states: UNCONNECTED, LOGIN, WAITING, GAME
+		self.game = None						# Game this player is playing
 	
 	def transmit(self, message):
 		# Python 3 workaround
@@ -57,26 +60,47 @@ class FungusProtocol(LineReceiver):
 		data = data.decode("utf-8")					# Convert bytestring back to normal (unicode) string
 
 		if self.state == "LOGIN":
-			self.name = data
-			self.state = "NOGAME"
-			self.transmit( 'Access granted, %s.' % (self.name) )
-		else:
-			# Interpret commands
-			if 'exit' in data:
-				self.transmit( 'Bye' )
-				self.transport.loseConnection()
-			# Relay data to peers
-			for num, connection in self.factory.connections.items():
-				if connection != self:
-					connection.transmit(data)
+			self.login(data)
+		elif self.state == "GAME":
+			self.relay(data)
+	
+	def login(self, data):
+		self.name = data
+		self.state = "WAITING"
+		self.transmit( 'Access granted, %s.' % (self.name) )
+		self.factory.newGame.append( self )
+		if len(self.factory.newGame) >= maxPlayers:
+			self.factory.startGame()
+
+	def relay(self, data):
+		# Interpret commands
+		if 'exit' in data:
+			self.transmit( 'Bye' )
+			self.transport.loseConnection()
+		# Relay data to peers
+		for player in self.game:
+			if player != self:
+				player.transmit(data)
 
 # What is a factory? Twisted confuses me.
 class FungusFactory(protocol.Factory):
 	numConnections = 0							# Count of open connections
 	connections = {}							# List (dictionary) of connections (protocol objects)
+	newGame = []								# Game waiting for enough players
+	games = []								# List of games in progress
 
 	def buildProtocol(self, addr):
 		return FungusProtocol(self)
+	
+	def startGame(self):
+		game = self.newGame
+		self.games.append(game)						# Move game to in progress
+		self.newGame = []						# Reset staging game
+		for player in game:
+			player.game = game
+			player.state = "GAME"
+			player.transmit( 'Enough players have arrived. Game started' )
+
 
 reactor.listenTCP(1701, FungusFactory())
 reactor.run()
