@@ -21,10 +21,15 @@ class FungusProtocol(LineReceiver):
 	def transmit(self, message):
 		# Python 3 workaround
 		# Converts unicode strings to byte strings before sending
-		# Twisted was writtern for Python 2, where strings are bytestrings
+		# Twisted was written for Python 2, where strings are bytestrings
 		# but in Python 3 they are unicode.
 		self.sendLine(message.encode("utf-8"))
-
+	
+	def txOtherPlayers(self, message):
+		# Send a message to all other players in the game
+		for player in self.game:
+			if player != self:
+				player.transmit(message)
 
 	def connectionMade(self):
 		# Log incoming IP address
@@ -55,6 +60,13 @@ class FungusProtocol(LineReceiver):
 		self.factory.numConnections -= 1				# Remove connection from count
 		del self.factory.connections[ self.num ]			# Remove self from list
 
+		# Inform all other players of disconnect
+		self.txOtherPlayers( 'Player %i disconnected.' % (self.game.index(self)) )
+
+		# Remove self from game
+		self.game.remove(self)
+		self.factory.checkEndgame( self.game )
+
 	#def dataReceived(self, data):
 	def lineReceived(self, data):
 		data = data.decode("utf-8")					# Convert bytestring back to normal (unicode) string
@@ -78,9 +90,7 @@ class FungusProtocol(LineReceiver):
 			self.transmit( 'Bye' )
 			self.transport.loseConnection()
 		# Relay data to peers
-		for player in self.game:
-			if player != self:
-				player.transmit(data)
+		self.txOtherPlayers(data)
 
 # What is a factory? Twisted confuses me.
 class FungusFactory(protocol.Factory):
@@ -100,6 +110,18 @@ class FungusFactory(protocol.Factory):
 			player.game = game
 			player.state = "GAME"
 			player.transmit( 'Enough players have arrived. Game started' )
+			player.transmit( 'Your are player number %i' % (game.index(player)) )
+	
+	def checkEndgame(self, game):
+		# If all but one player has disconnected
+		# ( do not make this <=1 or it will cause a loop )
+		if len(game) == 1:
+			# Disconnect all remaining players
+			for player in game:
+				player.transmit( 'Game Over' )
+				player.transport.loseConnection()
+			# Remove game from list
+			self.games.remove(game)
 
 
 reactor.listenTCP(1701, FungusFactory())
