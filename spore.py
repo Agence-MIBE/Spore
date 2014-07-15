@@ -61,7 +61,7 @@ class FungusProtocol(LineReceiver):
 		self.transmit( 'There are currently %i connections' % (self.factory.numConnections) )
 		self.transmit( 'This is connection number %i' % (self.num) )
 		self.transmit( 'Address: %s Port: %i' % (self.ip, self.port) )
-		self.transmit( 'USERNAME:' )					# Text in CAPS is client commands
+		self.transmit( 'USERNAME?' )					# Text in CAPS is client commands
 	
 	def connectionLost(self, reason):
 		print( ':: Disconnect %s at %s:%i' % (self.name,self.ip,self.port) )
@@ -74,6 +74,9 @@ class FungusProtocol(LineReceiver):
 			# Remove self from game
 			self.game.remove(self)
 			self.factory.checkEndgame( self.game )
+
+		if self.state == 'WAITING':
+			self.factory.newGame.remove(self)			# Remove self from staging game
 
 	#def dataReceived(self, data):
 	def lineReceived(self, data):
@@ -88,7 +91,7 @@ class FungusProtocol(LineReceiver):
 		if self.login_request == 'USERNAME':
 			self.name = data					# Set username
 			self.login_request = 'NUM_PLAYERS'			# Begin waiting for requested number of players
-			self.transmit( 'NUM_PLAYERS:' )
+			self.transmit( 'NUM_PLAYERS?' )
 		elif self.login_request == 'NUM_PLAYERS':
 			try:
 				self.req_players = int(data[0])			# Set number of players in game
@@ -133,7 +136,8 @@ class FungusFactory(protocol.Factory):
 		game = self.newGame
 		self.games.append(game)						# Move game to in progress
 		self.newGame = []						# Reset staging game
-		start_player = randint(0,maxPlayers)				# Choose random starting player
+		start_player = randint( 0, maxPlayers-1 )			# Choose random starting player
+		start_piece = randint( 0, 9 )					# Choose random starting piece
 		print( ':: Game #%i starting between ' % (self.games.index(game)) , end="" )
 		for player in game:
 			print(player.name, end=", ")
@@ -142,8 +146,8 @@ class FungusFactory(protocol.Factory):
 			player.transmit( 'Enough players have arrived. Game started' )
 			player.transmit( 'Your are player number %i' % (game.index(player)) )
 			player.transmit( 'YOUR_NUM: %i' % (game.index(player)) )
-			player.transmit( 'START: %i' % (start_player) )
-		print( 'starting with player %i' % (start_player) )
+			player.transmit( 'START: %i, %i' % (start_player,start_piece) )
+		print( 'starting with player %i and piece %i' % (start_player,start_piece) )
 	
 	def checkEndgame(self, game):
 		# If all but one player has disconnected
