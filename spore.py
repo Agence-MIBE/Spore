@@ -119,9 +119,12 @@ class FungusProtocol(LineReceiver):
 		if 'exit' in data:
 			self.transmit( 'Bye' )
 			self.transport.loseConnection()
-		# Relay data to peers
-		self.txOtherPlayers(data)
-
+		if 'PLACE:' in data or 'BITE:' in data:
+			self.txOtherPlayers(data)				# Relay move to peers
+			self.factory.turn( self.game )
+		if 'ROT:' in data:
+			self.txOtherPlayers(data)				# Relay move to peers
+			
 # What is a factory? Twisted confuses me.
 class FungusFactory(protocol.Factory):
 	numConnections = 0							# Count of open connections
@@ -148,6 +151,11 @@ class FungusFactory(protocol.Factory):
 			player.transmit( 'YOUR_NUM: %i' % (game.index(player)) )
 			player.transmit( 'START: %i, %i' % (start_player,start_piece) )
 		print( 'starting with player %i and piece %i' % (start_player,start_piece) )
+	
+	def turn(self, game):
+		new_piece = randint( 0, 9 )
+		for player in game:
+			player.transmit( 'TETRO: %i' % (new_piece) )
 	
 	def checkEndgame(self, game):
 		# If all but one player has disconnected
