@@ -1,8 +1,11 @@
-#!/usr/bin/python
+#!/usr/bin/python2
 #
 # Spore
 #
 # Matchmaking and relay server for Fungus.
+
+# Compatibility with Python 2
+from __future__ import print_function
 
 from random import randint
 
@@ -73,10 +76,11 @@ class FungusProtocol(LineReceiver):
 			self.txOtherPlayers( 'Player %i disconnected.' % (self.game.index(self)) )
 			# Remove self from game
 			self.game.remove(self)
-			self.factory.checkEndgame( self.game )
+			self.factory.checkEndgame( self.game )			# Should only do this if game is in progress
+			# Should send DISCONNECT: command so players know to remove from game and lobby
 
-		if self.state == 'WAITING':
-			self.factory.newGame.remove(self)			# Remove self from staging game
+		#if self.state == 'WAITING':
+		#	self.factory.newGame.remove(self)			# Remove self from staging game
 
 	#def dataReceived(self, data):
 	def lineReceived(self, data):
@@ -108,9 +112,19 @@ class FungusProtocol(LineReceiver):
 			# End login process and start game
 			self.login_request = None
 			self.state = 'WAITING'
+			self.game = self.factory.newGame
+			self.game.append( self )				# Add player to staging game
+			player_num = self.game.index(self)
 			self.transmit( 'Access granted, %s.' % (self.name) )
 			print( ':: Login from %s for %i player game' % (self.name,self.req_players) )
-			self.factory.newGame.append( self )			# Add player to staging game
+			self.transmit( 'YOUR_NUM: %i' % (player_num) )		# Send player's number
+			self.txOtherPlayers( 'NAME: %i, %s' % (player_num,self.name) )	# Send name to other players
+
+			# Send other player's names to this guy
+			for player in self.game:
+				if player != self:
+					self.transmit( 'NAME: %i, %s' % (self.game.index(player),player.name) )
+
 			if len(self.factory.newGame) >= maxPlayers:		# Start game if it has enough players
 				self.factory.startGame()
 
@@ -146,9 +160,9 @@ class FungusFactory(protocol.Factory):
 			print(player.name, end=", ")
 			player.game = game
 			player.state = "GAME"
-			player.transmit( 'Enough players have arrived. Game started' )
-			player.transmit( 'Your are player number %i' % (game.index(player)) )
-			player.transmit( 'YOUR_NUM: %i' % (game.index(player)) )
+			#player.transmit( 'Enough players have arrived. Game started' )
+			#player.transmit( 'Your are player number %i' % (game.index(player)) )
+			#player.transmit( 'YOUR_NUM: %i' % (game.index(player)) )
 			player.transmit( 'START: %i, %i' % (start_player,start_piece) )
 		print( 'starting with player %i and piece %i' % (start_player,start_piece) )
 	
