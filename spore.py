@@ -14,6 +14,12 @@ from twisted.protocols.basic import LineReceiver
 
 maxPlayers = 2
 
+# Each game contains a list of players (FungusProtocols),
+# settings (i.e. number of players, grid size),
+# and state information (current player, etc)
+class Game(list):
+	num_players = 0
+
 # Protocol instance is started for each connection
 class FungusProtocol(LineReceiver):
 	def __init__(self, factory):
@@ -76,11 +82,10 @@ class FungusProtocol(LineReceiver):
 			self.txOtherPlayers( 'Player %i disconnected.' % (self.game.index(self)) )
 			# Remove self from game
 			self.game.remove(self)
-			self.factory.checkEndgame( self.game )			# Should only do this if game is in progress
+			if self.game in self.factory.games:			# only do this if game is in progress
+				self.factory.checkEndgame( self.game )
 			# Should send DISCONNECT: command so players know to remove from game and lobby
-
-		#if self.state == 'WAITING':
-		#	self.factory.newGame.remove(self)			# Remove self from staging game
+			# also if staging game is now empty it should probably be removed from list
 
 	#def dataReceived(self, data):
 	def lineReceived(self, data):
@@ -100,21 +105,31 @@ class FungusProtocol(LineReceiver):
 			try:
 				self.req_players = int(data[0])			# Set number of players in game
 			except ValueError:					# Make sure client is sending integers
-				self.transmit( 'Error: That was not a number. Try again.' )
+				self.transmit( 'ERROR: That was not a number. Try again.' )
 				return
 			# Make sure value is within range
-			#if self.req_players < 2 or self.req_players > 4:
-			#	self.transmit( 'Error: Must choose either 2, 3, or 4 players.' )
-			#	return
-			if self.req_players != 2:
-				self.transmit( 'ERROR: Only supporting 2 player games right now' )
+			if self.req_players < 2 or self.req_players > 4:
+				self.transmit( 'ERROR: Must choose either 2, 3, or 4 players.' )
 				return
+
 			# End login process and start game
 			self.login_request = None
 			self.state = 'WAITING'
-			self.game = self.factory.newGame
+
+			# Check to see if any staging games meet criteria
+			for g in self.factory.newGames:
+				if g.num_players == self.req_players:
+					self.game = g
+					break
+			# If not, create a new one
+			if not self.game:
+				self.game = Game()
+				self.game.num_players = self.req_players
+				self.factory.newGames.append( self.game )
+
 			self.game.append( self )				# Add player to staging game
 			player_num = self.game.index(self)
+
 			self.transmit( 'Access granted, %s.' % (self.name) )
 			print( ':: Login from %s for %i player game' % (self.name,self.req_players) )
 			self.transmit( 'YOUR_NUM: %i' % (player_num) )		# Send player's number
@@ -125,8 +140,8 @@ class FungusProtocol(LineReceiver):
 				if player != self:
 					self.transmit( 'NAME: %i, %s' % (self.game.index(player),player.name) )
 
-			if len(self.factory.newGame) >= maxPlayers:		# Start game if it has enough players
-				self.factory.startGame()
+			if len(self.game) >= self.game.num_players:		# Start game if it has enough players
+				self.factory.startGame( self.game )
 
 	def relay(self, data):
 		# Interpret commands
@@ -143,16 +158,15 @@ class FungusProtocol(LineReceiver):
 class FungusFactory(protocol.Factory):
 	numConnections = 0							# Count of open connections
 	connections = {}							# List (dictionary) of connections (protocol objects)
-	newGame = []								# Game waiting for enough players
+	newGames = []								# List of games waiting for enough players
 	games = []								# List of games in progress
 
 	def buildProtocol(self, addr):
 		return FungusProtocol(self)
 	
-	def startGame(self):
-		game = self.newGame
+	def startGame(self, game):
 		self.games.append(game)						# Move game to in progress
-		self.newGame = []						# Reset staging game
+		self.newGames.remove(game)
 		start_player = randint( 0, maxPlayers-1 )			# Choose random starting player
 		start_piece = randint( 0, 9 )					# Choose random starting piece
 		print( ':: Game #%i starting between ' % (self.games.index(game)) , end="" )
@@ -160,15 +174,12 @@ class FungusFactory(protocol.Factory):
 			print(player.name, end=", ")
 			player.game = game
 			player.state = "GAME"
-			#player.transmit( 'Enough players have arrived. Game started' )
-			#player.transmit( 'Your are player number %i' % (game.index(player)) )
-			#player.transmit( 'YOUR_NUM: %i' % (game.index(player)) )
 			player.transmit( 'START: %i, %i' % (start_player,start_piece) )
 		print( 'starting with player %i and piece %i' % (start_player,start_piece) )
 	
 	def turn(self, game):
-		new_piece = randint( 0, 9 )
-		for player in game:
+		new_piece = randint( 0, 9 )					# Choose next piece
+		for player in game:						# Send it to all players
 			player.transmit( 'TETRO: %i' % (new_piece) )
 	
 	def checkEndgame(self, game):
